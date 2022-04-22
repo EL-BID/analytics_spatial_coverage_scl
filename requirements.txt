@@ -1,0 +1,12 @@
+folium
+geopandas==0.9.*
+rasterstats
+requests
+geojson
+backoff
+pyproj
+rtree
+mapbox
+utm
+pygeos
+shapely==1.8
