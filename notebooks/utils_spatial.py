@@ -31,6 +31,7 @@ from OSMPythonTools.data import Data, dictRangeYears, ALL
 from collections import OrderedDict
 from folium.plugins import MarkerCluster
 from shapely.ops import unary_union
+import shapely
 overpass = Overpass()
 api = overpy.Overpass()
 import time 
@@ -103,7 +104,7 @@ def create_isochrone_analysis(data, project_name, token,
             result.at[i, 'geometry'] = geom_
             result.at[i, 'FeatureCollection'] = geojson.FeatureCollection(geom_)
             geom_ = gpd.GeoDataFrame.from_features(geom_)
-            union_ = unary_union(geom_['geometry'].tolist())
+            union_ = shapely.ops.unary_union(geom_['geometry'].tolist())
             result.at[i, 'multipolygon'] = union_
         except:
             try:
@@ -112,7 +113,7 @@ def create_isochrone_analysis(data, project_name, token,
                 result.at[i, 'geometry'] = geom_
                 result.at[i, 'FeatureCollection'] = geojson.FeatureCollection(geom_)
                 geom_ = gpd.GeoDataFrame.from_features(geom_)
-                union_ = unary_union(geom_['geometry'].tolist())
+                union_ = shapely.ops.unary_union(geom_['geometry'].tolist())
                 result.at[i, 'multipolygon'] = union_
             except:                
                 pass
@@ -307,7 +308,7 @@ def get_basemap(level='0'):
     
     elif level == '1':
         world = gpd.read_file(scldatalake +
-                              'Geospatial Basemaps/Cartographic Boundary Files/LAC/level-1/IPUMS/world_geolev1_2021.zip')
+                              'Geospatial Basemaps/Cartographic Boundary Files/world/level-1/world-level-1.zip')
         world = world.rename(columns={"iso3":"isoalpha3"})
         world.columns = [x.lower() for x in world.columns]        
         return world
