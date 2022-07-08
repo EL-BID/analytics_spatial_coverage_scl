@@ -2,13 +2,10 @@
 
 
 <center>
-<div class="row">
-  <div class="column">
-    <img src="https://scldata.iadb.org/assets/iadb-7779368a000004449beca0d4fc6f116cc0617572d549edf2ae491e9a17f63778.png" width="17%" style="margin:50px 50px">
-    
-    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/Mapbox_logo_2019.svg/1200px-Mapbox_logo_2019.svg.png" width="20%" style="margin:50px 50px">
-  </div>
-</div>
+<p float="left">
+  <img src="https://scldata.iadb.org/assets/iadb-7779368a000004449beca0d4fc6f116cc0617572d549edf2ae491e9a17f63778.png" width="17%" style="margin:50px 50px">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1f/Mapbox_logo_2019.svg/1200px-Mapbox_logo_2019.svg.png" width="20%" style="margin:50px 50px">
+</p>
 </center>
 
 <h1 align="center"> Spatial coverage of social infrastructure  </h1>
