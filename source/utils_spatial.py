@@ -23,6 +23,7 @@ import zipfile
 
 from collections import OrderedDict
 from folium.plugins import MarkerCluster
+from geopandas.tools import sjoin
 from os import path
 from OSMPythonTools.data import Data, dictRangeYears, ALL
 from OSMPythonTools.nominatim import Nominatim
@@ -40,6 +41,11 @@ sclbucket = os.environ.get("sclbucket")
 scldatalake = os.environ.get("scldatalake")
 access_token = os.environ.get("access_token_dp")
 base_url = "https://api.mapbox.com/isochrone/v1/mapbox/"
+
+
+countries = pd.read_excel(scldatalake + 'Manuals and Standards/IADB country and area codes for statistical use/IADB_country_codes_admin_0.xlsx', engine='openpyxl')
+countries = countries[~(countries.iadb_region_code.isna())]
+countries = np.unique(countries.isoalpha3)
 
 ########
 # API
