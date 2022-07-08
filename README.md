@@ -37,8 +37,6 @@
 
 -	Outcome metrics were created at the national level and state level to identify the population without coverage.
 
----
-
 
 ### Authors
 - [Roberto Sánchez A.](https://github.com/rsanchezavalos)

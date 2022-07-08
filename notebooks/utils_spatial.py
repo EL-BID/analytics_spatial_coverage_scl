@@ -17,6 +17,8 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 import argparse
+import boto3
+import time
 
 import overpy
 import numpy as np
@@ -28,10 +30,11 @@ from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
 from OSMPythonTools.data import Data, dictRangeYears, ALL
 from collections import OrderedDict
 from folium.plugins import MarkerCluster
-
+from shapely.ops import unary_union
+import shapely
 overpass = Overpass()
 api = overpy.Overpass()
-
+import time 
 import zipfile
 import io
 import io
@@ -55,13 +58,14 @@ import matplotlib.pyplot as plt
 import dotenv
 dotenv.load_dotenv()
 
+sclbucket = os.environ.get("sclbucket")
 scldatalake = os.environ.get("scldatalake")
 access_token = os.environ.get("access_token")
 base_url = "https://api.mapbox.com/isochrone/v1/mapbox/"
 
-
-
 def isochrone(x, y, profile, minutes, generalize, token, base_url):
+    """
+    """
     if not x or not y:
         print("Missing coordinates, skipping")
         return
@@ -75,27 +79,51 @@ def isochrone(x, y, profile, minutes, generalize, token, base_url):
 
 
 def request_isochrone(url):
+    """
+    """
     print(f'Getting isochrone {url}')
     r = requests.get(url)
     r.raise_for_status()
     return r
 
-
-def create_isochrone_analysis(data, project_name=project_name,
-                              output_folder='../data', token=token, 
-                              profile=profile, time_profiles=time_profiles):
+def create_isochrone_analysis(data, project_name, token,
+                              profile, time_profiles,
+                              output_folder='../data'):
     """
     """
     result = pd.DataFrame({'profile': [profile] * len(time_profiles),'minutes': time_profiles})
     result['geometry'] = None
-    for i in temp.index:
-        print(time_profiles[i])
-        result.at[i, 'geometry'] = create_isochrones(data, project=project_name, output_folder='../data', 
-                                                   force=True, token=token, profile=profile, minutes=time_profiles[i])
+    result['FeatureCollection'] = None
+    result['multipolygon'] = None
+    #for i, row in result.iterrows():
+    for i in result.index:
+        print(i)
+        try:
+            geom_ = create_isochrones(data, project=project_name, output_folder='../data', 
+                                      force=True, token=token, profile=profile, minutes=time_profiles[i])
+            result.at[i, 'geometry'] = geom_
+            result.at[i, 'FeatureCollection'] = geojson.FeatureCollection(geom_)
+            geom_ = gpd.GeoDataFrame.from_features(geom_)
+            union_ = shapely.ops.unary_union(geom_['geometry'].tolist())
+            result.at[i, 'multipolygon'] = union_
+        except:
+            try:
+                geom_ = create_isochrones(data, project=project_name, output_folder='../data', 
+                                          force=True, token=token, profile=profile, minutes=time_profiles[i])
+                result.at[i, 'geometry'] = geom_
+                result.at[i, 'FeatureCollection'] = geojson.FeatureCollection(geom_)
+                geom_ = gpd.GeoDataFrame.from_features(geom_)
+                union_ = shapely.ops.unary_union(geom_['geometry'].tolist())
+                result.at[i, 'multipolygon'] = union_
+            except:                
+                pass
+
     return result.sort_values('minutes',ascending=False).reset_index(drop=True)
 
 def create_isochrones(df, project, output_folder, token,
                       profile='driving', minutes=30, limit=None, generalize=0, force=False):
+    """
+    """    
 
     output = f'{output_folder}/{project}_isochrone_{profile}_{minutes}.json'
     
@@ -108,34 +136,46 @@ def create_isochrones(df, project, output_folder, token,
             print("File already exists, exiting. To overwrite, run with --force.")
             return
 
-    with open(output, 'w') as output_file:
-        features = []
-        skipped = 0
+    #with open(output, 'w') as output_file:
+    features = []
+    skipped = 0
 
-        # Fix for NAN error when serializing to JSON
-        df = df.fillna('')
-        # TODO Support more default column names, or use args to define column name for each a la ogr2ogr
-        if not ('lat' in df.columns and 'lon' in df.columns):
-            print("Missing lat and lon columns")
-            return
-        gdf = gpd.GeoDataFrame(df.drop(['lon', 'lat'], axis=1),
-                               crs={'init': 'epsg:4326'},
-                               geometry=[Point(xy) for xy in zip(df.lon, df.lat)])
+    # Fix for NAN error when serializing to JSON
+    df = df.fillna('')
+    # TODO Support more default column names, or use args to define column name for each a la ogr2ogr
+    if not ('lat' in df.columns and 'lon' in df.columns):
+        print("Missing lat and lon columns")
+        return
+    gdf = gpd.GeoDataFrame(df.drop(['lon', 'lat'], axis=1),
+                            crs={'init': 'epsg:4326'},
+                            geometry=[Point(xy) for xy in zip(df.lon, df.lat)])
 
-        for i, row in gdf.iterrows():
-            if  limit == None or i <  limit:
+    for i, row in gdf.iterrows():
+        if  limit == None or i <  limit:
+            try:
                 iso = isochrone(row.geometry.x, row.geometry.y,  profile,
-                                 minutes,  generalize,  token, base_url)
+                                    minutes,  generalize,  token, base_url)
                 if iso:
                     iso['properties'] = row.drop('geometry').to_dict()
                     features.append(iso)
                 else:
                     skipped = skipped + 1
+            except:
+                
+                time.sleep(5)
+                try:
+                    iso = isochrone(row.geometry.x, row.geometry.y,  profile,
+                                        minutes,  generalize,  token, base_url)
+                    if iso:
+                        iso['properties'] = row.drop('geometry').to_dict()
+                        features.append(iso)
+                    else:
+                        skipped = skipped + 1
+                except:
+                    pass
 
-        feature_collection = geojson.FeatureCollection(features)
-        geometry = features.unary_union
-        #output_file.write(geojson.dumps(feature_collection, sort_keys=True))
-        return feature_collection, geometry
+    #output_file.write(geojson.dumps(feature_collection, sort_keys=True))
+    return features
 
 def get_country_amenity(isoalpha3, amenity):   
     """
@@ -172,18 +212,60 @@ def get_country_amenity(isoalpha3, amenity):
     return output_tot
 
 def get_country_amenities(isoalpha3, amenities):
+    """
+    """    
     results = []
     for amenity in amenities:
         try:
             results.append(get_country_amenity(isoalpha3, amenity))
         except:
-            print(f'Error for {isoalpha3} - amenity {amenity}')
+            try:
+                time.sleep(5)
+                results.append(get_country_amenity(isoalpha3, amenity))
+            except:
+                print(f'Error for {isoalpha3} - amenity {amenity}')
+
     result = pd.concat(results).reset_index(drop=True)
     return result
-        
+
+
+def get_countries_amenities(amenities, countries, output_path):
+    """
+    """
+    s3 = boto3.resource('s3')
+    s3bucket = s3.Bucket(sclbucket)
+    
+    db = {}
+    for isoalpha3 in countries:
+        if isoalpha3 not in [*db.keys()]:
+            try:
+                db[isoalpha3] = get_country_amenities(isoalpha3, amenities) 
+            except:
+                time.sleep(5)
+                db[isoalpha3] = get_country_amenities(isoalpha3, amenities) 
+                pass
+
+    temp = pd.concat(db)
+    temp = temp.reset_index().rename(columns={'level_0':'isoalpha3'})
+
+    path = '_'.join(amenities)
+    files = [object_ for object_ in s3bucket.objects.filter(Prefix=output_path )]
+
+    if len(files) > 0:
+        temp.to_csv(scldatalake + output_path,
+                    index=False)
+        print("File has been successfully uploaded to SCLData")
+
+    else:
+        print('Please upload *manually* the file {0} to SCLData'.format(output_path))
+        temp.to_csv(f'../data/OSM_{path}_LAC.csv',
+                    index=False)   
+    return temp
         
     
 def get_dictionary(collection='census'):
+    """
+    """    
     if collection=='census':
         dictionary = pd.read_csv(scldatalake +
                                          'Population and Housing Censuses/Population and Housing Censuses Indicators/D.7.2.1 Diccionario - indicadores de censos de población.csv')
@@ -216,7 +298,8 @@ def get_indicators(collection, level):
     
 
 def get_basemap(level='0'):
-
+    """
+    """
     if level == '0':
         world = gpd.read_file(scldatalake +
                               'Geospatial Basemaps/Cartographic Boundary Files/world/level-0/world-level-0.zip')
@@ -225,7 +308,7 @@ def get_basemap(level='0'):
     
     elif level == '1':
         world = gpd.read_file(scldatalake +
-                              'Geospatial Basemaps/Cartographic Boundary Files/LAC/level-1/IPUMS/world_geolev1_2021.zip')
+                              'Geospatial Basemaps/Cartographic Boundary Files/world/level-1/world-level-1.zip')
         world = world.rename(columns={"iso3":"isoalpha3"})
         world.columns = [x.lower() for x in world.columns]        
         return world
@@ -281,17 +364,32 @@ def get_indicator(indicators, indicador, tema, tiempo_id,
 
 #############################
 
-def plot_lat_lon(data):
-    coords  = []
-    coords += [(float(data.lon[node]), float(data.lat[node])) for node in range(len(data))]
-    print(len(coords))
-    X = np.array(coords)
-    plt.plot(X[:, 0], X[:, 1], 'o')
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
-    plt.axis('equal')
+def plot_lat_lon(data, method='plt', zoom_start=7):
+    """
+    """    
+    if method=='plt':
+        coords  = []
+        coords += [(float(data.lon[node]), float(data.lat[node])) for node in range(len(data))]
+        print(len(coords))
+        X = np.array(coords)
+        plt.plot(X[:, 0], X[:, 1], 'o')
+        plt.xlabel('Longitude')
+        plt.ylabel('Latitude')
+        plt.axis('equal')
+
+        return plt.show()
     
-    return plt.show()
+    elif method=='folium':
+        lat_mean = np.mean(data['lat'])
+        lon_mean = np.mean(data['lon'])
+
+        m = folium.Map(location=[lat_mean,lon_mean], zoom_start=zoom_start, tiles='CartoDB positron')
+        marker_cluster = MarkerCluster().add_to(m)        
+        for index, x in data.iterrows():
+            
+            folium.Marker([x["lat"], x["lon"]]).add_to(marker_cluster)
+            
+        return m
 
 def geo_plot(world, data, indicator):
     """
@@ -378,7 +476,7 @@ def geo_simple_plot_old(world):
 
     return m
 
-def plot_isochone_points(facility_data, isochrones_data, zoom_start):
+def plot_isochone_points(facility_data, isochrones_data, zoom_start, geom='FeatureCollection'):
     """
     """
     lat_mean = np.mean(facility_data['lat'])
@@ -389,7 +487,7 @@ def plot_isochone_points(facility_data, isochrones_data, zoom_start):
     color = ['#999999', '#bcbddc', '#ef8a62']
     for i, x in isochrones_data.iterrows():
         fillColor = color[i]
-        folium.GeoJson(data=x['geometry'], name=x['profile'],
+        folium.GeoJson(data=x[geom], name=x['profile'],
                        style_function=lambda x,
                        fillColor=fillColor, color=fillColor: {
                            "fillColor": fillColor,
@@ -403,10 +501,3 @@ def plot_isochone_points(facility_data, isochrones_data, zoom_start):
     for index, x in facility_data.iterrows():
         folium.Marker([x["lat"], x["lon"]], popup=x["name"]).add_to(marker_cluster)
     return m
-
-#aws s3api put-object-tagging --bucket cf-p-scldata-prod-s3-p-scldata-app --key 'Labour Force Surveys/MEX-ENOE/2018/t1/data_orig/VIVT118.dta' --tagging 'TagSet=[{Key=riskType,Value=myValue}]'
-
-#s3://cf-p-scldata-prod-s3-p-scldata-app/
-    
-    
-    

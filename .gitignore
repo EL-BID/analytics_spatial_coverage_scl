@@ -133,5 +133,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
 app/.Rhistory
 *.dcf
+
+notebooks/cache/
+legacy/
+data/
+

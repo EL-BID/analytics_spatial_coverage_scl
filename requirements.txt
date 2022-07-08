@@ -1,3 +1,7 @@
+wordcloud
+OSMPythonTools
+overpy
+pyshp
 folium
 geopandas==0.9.*
 rasterstats
