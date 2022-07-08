@@ -11,12 +11,19 @@
 <h1 align="center"> Spatial coverage of social infrastructure  </h1>
 
 
+
 ## Index:
 --- 
 - [Description and Context](#description-and-context)
 - [Methodology](#methodology)
 - [Author(s)](#authors)
 
+### Description and Context
+This repository contains the code of the *Spatial coverage of social infrastructure tool.* 
+
+- [Shiny app](https://bid-data.shinyapps.io/infrastructure_coverage/)
+
+- [Code](https://github.com/BID-DATA/analytics_spatial_coverage_scl)
 
 ## Description and Context
 ---
