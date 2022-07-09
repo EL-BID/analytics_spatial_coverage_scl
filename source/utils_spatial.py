@@ -10,6 +10,8 @@ import folium
 import geojson
 import geopandas as gpd
 import io
+import json
+import mapclassify
 import matplotlib.pyplot as plt
 import numpy as np
 import os 
@@ -21,6 +23,11 @@ import time
 import time 
 import zipfile
 
+import branca.colormap as cm
+from geojson import Feature, Point, FeatureCollection
+from geopandas.tools import sjoin
+from h3 import geo_to_h3, h3_to_geo_boundary
+from shapely.geometry import Polygon
 from collections import OrderedDict
 from folium.plugins import MarkerCluster
 from geopandas.tools import sjoin
@@ -32,6 +39,10 @@ from pathlib import Path
 from shapely.geometry import Point
 from shapely.ops import unary_union
 from wordcloud import WordCloud, STOPWORDS, ImageColorGenerator
+
+import seaborn as sns
+
+
 
 ########
 # ENV
@@ -57,8 +68,10 @@ api = overpy.Overpass()
 # Isochrone / Mapbox
 ########
 
-def create_isochrone_analysis_countries(amenities_full, countries):
+def create_isochrone_analysis_countries(amenities_full, countrie0s, amenity, transport_profile, time_profiles):
     """
+    Creates a table with concatenated lists of infrastructure for a list of countries in the dataset.
+    Grouped by country, mode of transport and time profile
     """
     
     isochrones = []
@@ -68,14 +81,15 @@ def create_isochrone_analysis_countries(amenities_full, countries):
             project_name = f'{isoalpha3}_{amenity}' 
             isochrones_data = create_isochrone_analysis(data = amenities_iso, project_name=project_name,
                                                         output_folder='../data', token=access_token, 
-                                                        profile=profile, time_profiles=time_profiles)    
+                                                        profile=transport_profile, time_profiles=time_profiles)    
             isochrones_data['isoalpha3'] = isoalpha3
             isochrones_data['amenity'] = amenity
             isochrones.append(isochrones_data)  
-            print('true ' + isoalpha3)
-        except:
+            print('success ' + isoalpha3)
+        except Exception as e: 
             print('Error ' + isoalpha3)
-    
+            print(e)
+
     output = pd.concat(isochrones)
     
     return output
@@ -101,7 +115,8 @@ def create_isochrone_analysis(data, project_name, token,
             geom_ = gpd.GeoDataFrame.from_features(geom_)
             union_ = shapely.ops.unary_union(geom_['geometry'].tolist())
             result.at[i, 'multipolygon'] = union_
-        except:
+        except Exception as e: 
+            print(e)
             try:
                 geom_ = create_isochrones(data, project=project_name, output_folder='../data', 
                                           force=True, token=token, profile=profile, minutes=time_profiles[i])
