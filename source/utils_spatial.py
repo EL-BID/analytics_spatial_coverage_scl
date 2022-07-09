@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+#!pip install backoff
 
 import argparse
 import backoff
@@ -20,7 +21,6 @@ import pandas as pd
 import requests
 import shapely
 import time
-import time 
 import zipfile
 
 import branca.colormap as cm
@@ -43,9 +43,8 @@ from wordcloud import WordCloud, STOPWORDS, ImageColorGenerator
 import seaborn as sns
 
 
-
 ########
-# ENV
+# ENV Load env variables
 ########
 dotenv.load_dotenv()
 sclbucket = os.environ.get("sclbucket")
@@ -53,8 +52,9 @@ scldatalake = os.environ.get("scldatalake")
 access_token = os.environ.get("access_token_dp")
 base_url = "https://api.mapbox.com/isochrone/v1/mapbox/"
 
-
+########
 # Countries
+########
 countries = pd.read_excel(scldatalake + 'Manuals and Standards/IADB country and area codes for statistical use/IADB_country_codes_admin_0.xlsx', engine='openpyxl')
 countries = countries[~(countries.iadb_region_code.isna())]
 countries = np.unique(countries.isoalpha3)
@@ -67,6 +67,100 @@ api = overpy.Overpass()
 
 s3 = boto3.resource('s3')
 s3bucket = s3.Bucket(sclbucket)
+
+########
+# Coverage analysis
+########
+
+def create_coverage_dataset(amenity, population_, profile, minute):
+    """
+    """
+    
+    # Load Population
+    population = gpd.read_file(scldatalake + 
+                               'Development Data Partnership/'+
+                               'Facebook - High resolution population density map/'+
+                               f'public-fb-data/geojson/LAC/{population_}_4'+
+                               '.geojson')
+    population = population[~(population.isoalpha3.isna()) & (population.isoalpha3.isin(countries))]
+    population.population.sum()
+
+    # Load isochrones
+    # ToDo(rsanchezavalos) read from preprocess s3
+    isochrones_data = pd.read_csv(f"../data/LAC_{amenity}_{profile}.csv")
+    isochrones_data = isochrones_data[['isoalpha3', 'amenity', 'profile', 'minutes', 'multipolygon']]
+    isochrones_data = isochrones_data[~(isochrones_data['multipolygon'].isna())]
+
+    for minute in ['15', '30', '45']:
+
+        # Keep isochrones from selected time profile
+        isochrone = isochrones_data[isochrones_data.minutes == int(minute)].reset_index()
+        isochrone = isochrone[~(isochrone.multipolygon.isna())].reset_index()
+        isochrone['geometry'] = gpd.GeoSeries.from_wkt(isochrone['multipolygon'])
+        geom = gpd.GeoDataFrame(isochrone, geometry='geometry')
+        geom = geom[['isoalpha3', 'amenity', 'profile', 'minutes', 'multipolygon', 'geometry']]
+
+        # Quick Fix - some isochrones cover more than one country
+        output = []
+        for isoalpha3 in countries:
+            gdf_match_iso = sjoin(population[population.isoalpha3==isoalpha3], geom[geom.isoalpha3==isoalpha3], how='left')
+            output.append(gdf_match_iso)
+
+        # ToDo(rsanchezavalos) Check population inconsistencies - gdf_match.population.sum()
+        gdf_match = pd.concat(output)
+        gdf_match.population.sum()
+        del gdf_match['index_right']
+        gdf_match.loc[(gdf_match.profile.isna()), 'profile'] = profile
+        gdf_match.loc[(gdf_match.amenity.isna()), f'coverage_{minute}'] = 'uncovered'
+        gdf_match.loc[~(gdf_match.amenity.isna()), f'coverage_{minute}'] = 'covered'
+        gdf_match.loc[(gdf_match.population.isna()), 'population'] = 0
+        gdf_match.loc[(gdf_match.minutes.isna()), 'minutes'] = minute
+        gdf_match.loc[(gdf_match.amenity.isna()), 'amenity'] = amenity
+        gdf_match['value'] = np.log(gdf_match.population)
+        gdf_match.loc[(gdf_match['value']<0),'value']=0
+
+        out = gdf_match.groupby(['amenity', f'coverage_{minute}'])['population'].sum().reset_index()
+        out['pct'] = out.population/out.population.sum()*100
+
+        # Spatial joinworld - state level
+        # ToDo(rsanchezavalos)> calculate the spatial intersection to drop duplicates
+        gdf_match['index'] = gdf_match.index
+        test = sjoin(gdf_match, world_, how='left')
+        test = test.drop_duplicates(['index'])
+
+        # add national population
+        level_1 = test.groupby(['isoalpha3','admin_name', f'coverage_{minute}'])['population'].sum().reset_index()
+        t = level_1.groupby(['isoalpha3','admin_name'])['population'].sum().reset_index().rename(columns={'population':'poptot'})
+        level_1 = level_1.merge(t, on=['isoalpha3','admin_name'], how='left')
+        level_1['pct'] = level_1.population/level_1.poptot*100
+
+        level_1 = level_1[level_1.isoalpha3.isin(geom.isoalpha3)]
+
+        # fillna population for 100% coverage
+        temp = (level_1.groupby(['isoalpha3', 'admin_name'])['poptot']
+                .count().reset_index()
+                .query('poptot == 1'))[['isoalpha3', 'admin_name']]
+        temp[f'coverage_{minute}'] = 'uncovered'
+        level_1 = level_1.merge(temp, on=['isoalpha3', 'admin_name', f'coverage_{minute}'], how='outer')
+        level_1['poptot'] = level_1['poptot'].fillna(level_1.groupby(['isoalpha3', 'admin_name'])['poptot'].transform('max'))
+        level_1['population'] = level_1['population'].fillna(0)
+        level_1['pct'] = level_1['pct'].fillna(0)
+
+        # filter only uncovered
+        level_1 = level_1[level_1[f'coverage_{minute}']=='uncovered'].sort_values('population', ascending=False)
+
+        country_result = world_.merge(level_1, on=['isoalpha3','admin_name'], how='left')
+
+        output_path = f"Geospatial infrastructure/Healthcare Facilities/coverage/coverage_{population_}_{minute}.csv"
+        files = [object_ for object_ in s3bucket.objects.filter(Prefix=output_path)]
+
+        if len(files) > 0:
+            country_result.to_csv(scldatalake + output_path,index=False)
+            print("File has been successfully uploaded to SCLData")
+
+        else:
+            country_result.to_csv(f'../data/coverage_{population_}_{minute}.csv',index=False)
+            print('Please manually upload the file {0} in SCLData'.format(output_path))    
 
 ########
 # Isochrone / Mapbox
