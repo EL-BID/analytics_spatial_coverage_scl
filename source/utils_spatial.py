@@ -72,7 +72,7 @@ s3bucket = s3.Bucket(sclbucket)
 # Coverage analysis
 ########
 
-def create_coverage_dataset(amenity, population_, profile, minute):
+def create_coverage_dataset(world, amenity, population_, profile, minutes):
     """
     """
     
@@ -91,7 +91,7 @@ def create_coverage_dataset(amenity, population_, profile, minute):
     isochrones_data = isochrones_data[['isoalpha3', 'amenity', 'profile', 'minutes', 'multipolygon']]
     isochrones_data = isochrones_data[~(isochrones_data['multipolygon'].isna())]
 
-    for minute in ['15', '30', '45']:
+    for minute in minutes:
 
         # Keep isochrones from selected time profile
         isochrone = isochrones_data[isochrones_data.minutes == int(minute)].reset_index()
@@ -106,6 +106,7 @@ def create_coverage_dataset(amenity, population_, profile, minute):
             gdf_match_iso = sjoin(population[population.isoalpha3==isoalpha3], geom[geom.isoalpha3==isoalpha3], how='left')
             output.append(gdf_match_iso)
 
+            
         # ToDo(rsanchezavalos) Check population inconsistencies - gdf_match.population.sum()
         gdf_match = pd.concat(output)
         gdf_match.population.sum()
@@ -124,17 +125,17 @@ def create_coverage_dataset(amenity, population_, profile, minute):
 
         # Spatial joinworld - state level
         # ToDo(rsanchezavalos)> calculate the spatial intersection to drop duplicates
+        gdf_match = gdf_match.reset_index()
         gdf_match['index'] = gdf_match.index
-        test = sjoin(gdf_match, world_, how='left')
+        test = sjoin(gdf_match, world, how='left')
         test = test.drop_duplicates(['index'])
-
+        
         # add national population
         level_1 = test.groupby(['isoalpha3','admin_name', f'coverage_{minute}'])['population'].sum().reset_index()
         t = level_1.groupby(['isoalpha3','admin_name'])['population'].sum().reset_index().rename(columns={'population':'poptot'})
         level_1 = level_1.merge(t, on=['isoalpha3','admin_name'], how='left')
         level_1['pct'] = level_1.population/level_1.poptot*100
-
-        level_1 = level_1[level_1.isoalpha3.isin(geom.isoalpha3)]
+        level_1 = level_1[level_1.isoalpha3.isin(list(geom.isoalpha3))]
 
         # fillna population for 100% coverage
         temp = (level_1.groupby(['isoalpha3', 'admin_name'])['poptot']
@@ -145,11 +146,11 @@ def create_coverage_dataset(amenity, population_, profile, minute):
         level_1['poptot'] = level_1['poptot'].fillna(level_1.groupby(['isoalpha3', 'admin_name'])['poptot'].transform('max'))
         level_1['population'] = level_1['population'].fillna(0)
         level_1['pct'] = level_1['pct'].fillna(0)
-
+        
         # filter only uncovered
         level_1 = level_1[level_1[f'coverage_{minute}']=='uncovered'].sort_values('population', ascending=False)
 
-        country_result = world_.merge(level_1, on=['isoalpha3','admin_name'], how='left')
+        country_result = world.merge(level_1, on=['isoalpha3','admin_name'], how='left')
 
         output_path = f"Geospatial infrastructure/Healthcare Facilities/coverage/coverage_{population_}_{minute}.csv"
         files = [object_ for object_ in s3bucket.objects.filter(Prefix=output_path)]
@@ -161,6 +162,8 @@ def create_coverage_dataset(amenity, population_, profile, minute):
         else:
             country_result.to_csv(f'../data/coverage_{population_}_{minute}.csv',index=False)
             print('Please manually upload the file {0} in SCLData'.format(output_path))    
+        return country_result
+
 
 ########
 # Isochrone / Mapbox
