@@ -1,22 +1,13 @@
 source("utils.R")
 source("source.R")
-library(shiny)
-library(shinyWidgets)
-library(leaflet)
-library(markdown)
-library(shinythemes)
-library(shinycssloaders)
 
-
-
-#sort($country_name_en)
 navbarPage( title = "SCL-Lab", 
             id="nav",
             theme = shinytheme("simplex"),
               tabPanel("Project Readme",
                        fluidRow(
                          absolutePanel(title = "Project Readme", class = "panel panel-default",
-                                       fixed = TRUE,
+                                       fixed = FALSE,
                                        draggable = FALSE, 
                                        left = "5%",
                                        right = "5%", 
@@ -25,8 +16,7 @@ navbarPage( title = "SCL-Lab",
                                        height = "auto",
                                        column(12, 
                                               div(
-                                                style = "width: 80%; margin: auto;
-                                                        height: 80%; ",
+                                                style = "width: 80%;",
                                                 htmlOutput("readme2")))
                          ))),
               tabPanel("Map",
@@ -76,38 +66,20 @@ navbarPage( title = "SCL-Lab",
                                                           selected = "total_population"
                                               ),
                                               # ToDo(rsanchezavalos) - Too slow
-                                              # selectInput("driveTime",
-                                              #             "Drive Time (Consider that this may take a couple of minutes.)",
-                                              #             seq(15, 45, 15),
-                                              #             selected = c(30),
-                                              #             multiple = FALSE),
-                                              radioButtons("coverage", "Show Coverage:",
-                                                           choiceNames = list(
-                                                             HTML("<p style='color:green;'>Yes</p>"),
-                                                             HTML("<p style='color:red;'>No</p>")
-                                                             
-                                                           ),
-                                                           choiceValues = list(
-                                                             "True", "False"),
-                                                           selected = "True"),
-                                              # radioButtons("population_rb", "Show population:",
-                                              #              choiceNames = list(
-                                              #                HTML("<p style='color:green;'>Yes</p>"),
-                                              #                HTML("<p style='color:red;'>No</p>")
-                                              #                
-                                              #              ),
-                                              #              choiceValues = list(
-                                              #                "True", "False"),
-                                              #              selected = "False"),
-                                              radioButtons("amenities_rb", "Show amenities:",
-                                                           choiceNames = list(
-                                                             HTML("<p style='color:green;'>Yes</p>"),
-                                                             HTML("<p style='color:red;'>No</p>")
-                                                             
-                                                           ),
-                                                           choiceValues = list(
-                                                             "True", "False"),
-                                                           selected = "False"),
+                                              selectInput("driveTime",
+                                                          "Drive Time (Consider that this may take a couple of minutes.)",
+                                                          seq(15, 45, 15),
+                                                          selected = c(30),
+                                                          multiple = FALSE),
+                                              p("Show Coverage:"),
+                                              switchInput(inputId = "coverage",
+                                                          value = TRUE),
+                                              p("Show population:"),
+                                              switchInput(inputId = "population_rb",
+                                                          value = FALSE),
+                                              p("Show amenities:"),                                              
+                                              switchInput(inputId = "amenities_rb",
+                                                          value = FALSE),
                                               
                                 ),
                                 tags$div(id="SCLData + OpenStreetMap services"),
@@ -121,7 +93,7 @@ navbarPage( title = "SCL-Lab",
                                        height = "90%",
                                        br(),
                                        h2("Coverage Results"),
-                                       h4(HTML("<p style='color:red;'>Results may change - undergoing validation- </p>")),
+                                       #h4(HTML("<p style='color:red;'>Results may change - undergoing validation- </p>")),
                                        
                                        p("Total Population: "),
                                        
