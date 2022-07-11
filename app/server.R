@@ -5,30 +5,45 @@ scldatalake = Sys.getenv("scldatalake")
 
 
 shinyServer(function(input, output) {
+  #############
+  # Compile readme
+  #############  
+  output$readme2 <- renderUI({
+    HTML(markdown::markdownToHTML('README.md',
+                                  style=list(html.output='diff.w.style')))
+  })
+  
+  #############
+  # Load Data
+  #############
+  population_load <- eventReactive({input$population},{
+      
+      
+      if (input$population=='total_population') {
+        path <- "./data/total_population_4.geojson"
+        geo <- geojson_sf(path) %>%
+          left_join(countries, how='left', on='isoalpha3') 
+        
+      } else {
+        path <- str_c(scldatalake,"/Development Data Partnership/",
+                      "Facebook - High resolution population density map/",
+                      "public-fb-data/geojson/LAC/",input$population,"_4.geojson")
+        geo <- s3read_using(FUN = geojson_sf,
+                            object = path) %>%
+          left_join(countries, how='left', on='isoalpha3')
+      }
 
-  # Data
-  population_map <- eventReactive({input$population 
-                                   input$population_rb 
-                                   }, {
-                                     
-                                     
-    if (input$population=='total_population') {
-      path <- "./data/total_population_4.geojson"
-      geo <- geojson_sf(path) %>%
-        left_join(countries, how='left', on='isoalpha3') %>% 
-        filter(country_name_en==input$country) 
+      return(geo)
+    })  
+  
+  population_map <- eventReactive({input$population
+                                  input$country},{
+    geo <- population_load()
+    if (input$country!='All'){
+      geo <- geo %>% 
+       filter(country_name_en==input$country) 
       
-    } else {
-      path <- str_c(scldatalake,"/Development Data Partnership/",
-                    "Facebook - High resolution population density map/",
-                    "public-fb-data/geojson/LAC/",input$population,"_4.geojson")
-      geo <- s3read_using(FUN = geojson_sf,
-                          object = path) %>%
-        left_join(countries, how='left', on='isoalpha3') %>% 
-        filter(country_name_en==input$country) 
-      
-      
-    }
+    } 
     
     return(geo)
   })  
@@ -86,13 +101,12 @@ shinyServer(function(input, output) {
   #   })
   
   coverage_data <- eventReactive({input$population
-    #input$driveTime
+    input$driveTime
     }, {
-      if (input$population=='total_population' #& input$driveTime=='30'
+      if (input$population=='total_population' & input$driveTime=='30'
           ) {
         
-        db <- read_csv(str_c('./data/coverage_total_population_', #input$driveTime,
-                             '30', '.csv')) %>%
+        db <- read_csv(str_c('./data/coverage_total_population_30.csv')) %>%
           left_join(countries, how='left', on='isoalpha3') %>% 
           filter(!isoalpha3 %in% skipcountries) %>%
           mutate(pct = pct/100)
@@ -100,8 +114,10 @@ shinyServer(function(input, output) {
       } else {
         path <- str_c(scldatalake,
                       "/Geospatial infrastructure/Healthcare Facilities/",
-                      "coverage/coverage_",input$population,"_", # input$driveTime
-                      '30','.csv')
+                      "coverage/coverage_",input$population,"_",
+                      input$driveTime,
+                      #'30',
+                      '.csv')
         print(path)
         db <- s3read_using(FUN = read_csv,
                                       object = path) %>%
@@ -120,7 +136,7 @@ shinyServer(function(input, output) {
     })
   
   coverage <- eventReactive({input$population 
-    #input$driveTime
+    input$driveTime
     input$amenity 
     input$country}, {
       
@@ -155,28 +171,43 @@ shinyServer(function(input, output) {
       }
     })
   
- 
+  #############
+  # Quick Metrics
+  #############
+  output$amenity_count<-renderText({
+    count<-country() %>% nrow()
+    return(as.character(comma(count))) 
+  })
   
+  output$population_count <-renderText({
+    #population_ <- population_map()
+    population_ <- coverage() 
+    count<- sum(population_$poptot, na.rm = T)
+    return(as.character(comma(count))) 
+  })
+  
+  #############
+  # Map Leaflet
+  #############  
   output$map <- renderLeaflet({
     
     amenity<-country()
     lat_m <- mean(amenity$lat)
     lon_m <- mean(amenity$lon)
     
-    #if (input$population_rb=='True') {
-    if (FALSE) {
+    if (input$population_rb==TRUE) {
       population_ <- population_map()
       bins <- quantile(population_$population, probs = seq(0, 1, 0.25), 
                        na.rm = T,names = FALSE)
       pal <- colorBin("YlOrRd", domain = population_$population, bins = bins)
       
-      labels <- sprintf("<br/>Total Population: %s",
-                              scales::comma(population_$population)) %>% 
+      labels <- sprintf("<br/>Estimated Total Population: %s",
+                              scales::comma(round(population_$population))) %>% 
         lapply(htmltools::HTML)
       
       m<-leaflet(population_)  %>% addProviderTiles(providers$CartoDB.Positron) %>% 
         addPolygons(fillColor = ~pal(population_$population),
-                    weight = 2,
+                    weight = .5,
                     opacity = 1,
                     color = "white",
                     label = labels,
@@ -193,6 +224,9 @@ shinyServer(function(input, output) {
     m %>%
       clearMarkers() %>%
       clearShapes()
+    
+    # Note: Commented, Isochrones cannot be displayed in public version
+    # ToDo(rsanchezavalos)
     
     # if ( isTruthy(iso) & input$isochrone=="True") {
     #iso <-isochrone()
@@ -228,11 +262,12 @@ shinyServer(function(input, output) {
     #                 options = pathOptions(pane = '45'))
     # }
     
-    if (input$coverage=="True") {
+    if (input$coverage==TRUE) {
       geom <-coverage()
 
       bins <- quantile(geom$pct, probs = seq(0, 1, 0.25), 
                        na.rm = T,names = FALSE)
+      bins <- unique(bins)
       pal <- colorBin("YlOrRd", domain = geom$pct, bins = bins)
       
       labels <- str_c(sprintf("Admin_name: <strong>%s</strong>
@@ -263,10 +298,13 @@ shinyServer(function(input, output) {
                       style = list("font-weight" = "normal", padding = "3px 8px"),
                       textsize = "15px",
                       direction = "auto")) %>%
-        addLegend(pal = pal, values = ~geom$pct, opacity = 0.9, title = NULL,
+        addLegend(pal = pal, 
+                  labFormat=labelFormat(digits = 2,
+                                        suffix = '%',
+                                        transform =  function(x){ x*100}),
+                  values = geom$pct, 
+                  opacity = 0.9, title = NULL,
                   position = "bottomleft")
-      
-      
     }
     
 
@@ -278,14 +316,14 @@ shinyServer(function(input, output) {
                       amenity$name) %>% 
       lapply(htmltools::HTML)
     
-    if (input$amenities_rb=='True') {
+    if (input$amenities_rb==TRUE) {
       m <- m %>%
         addCircleMarkers(data = amenity, ~lon, ~lat,
                          label = labels,
                          radius = 3,
                          color = 'blue',
                          stroke = FALSE,
-                         fillOpacity = 0.5,
+                         fillOpacity = 0.2,
                          clusterOptions = markerClusterOptions())
     }
     
@@ -294,25 +332,19 @@ shinyServer(function(input, output) {
   
   observe({
     m <- leafletProxy("map") 
+
     return(m)
     
   })
   
-  output$amenity_count<-renderText({
-    count<-country() %>% nrow()
-    return(as.character(comma(count))) 
-    })
-  
-  output$population_count <-renderText({
-    #population_ <- population_map()
-    population_ <- coverage() 
-    count<- sum(population_$poptot, na.rm = T)
-    return(as.character(comma(count))) 
-  })
-  
+  #############
+  # Outputs
+  #############
   coverage_out <- eventReactive({input$population
+                                 input$driveTime
                                  input$country
                                  input$amenity}, {
+                                                                      
       out <- coverage() %>% 
         select(-geometry) %>% 
         mutate(uncov_pop = scales:::comma(poptot*pct),
@@ -320,9 +352,10 @@ shinyServer(function(input, output) {
                poptot = scales:::comma(poptot)) %>% 
         arrange(desc(pct)) %>% 
         as_tibble() %>% 
-        select(isoalpha3, admin_name, poptot, uncov_pop, pct) 
+        select(isoalpha3, admin_name, total_population=poptot, uncovered_population=uncov_pop, pct) 
       
     })
+  
   output$downloadData <- downloadHandler(
     filename = function() {
       str_c('coverage_',input$population,'_',input$amenity, ".csv")
@@ -332,6 +365,7 @@ shinyServer(function(input, output) {
                 file, row.names = FALSE)
     }
   )  
+  
   output$table <- renderDataTable({
     DT::datatable(coverage_out(),
                   filter='none',
@@ -342,10 +376,5 @@ shinyServer(function(input, output) {
                     ordering=T)) %>% 
       formatPercentage(c("pct"), 2)
     })
-  
-  output$readme2 <- renderUI({
-    HTML(markdown::markdownToHTML('README.md',
-                                  style=list(html.output='diff.w.style')))
-  })
   
 })
